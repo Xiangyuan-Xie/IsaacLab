@@ -84,6 +84,92 @@ import gymnasium as gym
 import torch
 from rsl_rl.runners import DistillationRunner, OnPolicyRunner
 
+try:
+    import rsl_rl.algorithms.ppo as _rsl_ppo
+    from rsl_rl.runners import on_policy_runner as _rsl_runner_mod
+
+    _OriginalPPOUpdate = _rsl_ppo.PPO.update
+    _OriginalConstructAlgorithm = _rsl_runner_mod.OnPolicyRunner._construct_algorithm
+    _OriginalLog = _rsl_runner_mod.OnPolicyRunner.log
+
+    def _compute_entropy_coef_from_cfg(entropy_cfg, step, total_steps):
+        if not isinstance(entropy_cfg, dict):
+            return None
+        initial = float(entropy_cfg.get("entropy_coef", 0.01))
+        schedule_type = entropy_cfg.get("schedule", "linear")
+        target = float(entropy_cfg.get("schedule_target", initial))
+        start_ratio = float(entropy_cfg.get("start_ratio", 0.0))
+        end_ratio = float(entropy_cfg.get("end_ratio", 1.0))
+        if total_steps is None or total_steps <= 1:
+            progress = 1.0
+        else:
+            progress = step / float(max(total_steps - 1, 1))
+        if progress <= start_ratio:
+            return initial
+        if progress >= end_ratio:
+            return target
+        if end_ratio <= start_ratio:
+            return target
+        alpha = (progress - start_ratio) / (end_ratio - start_ratio)
+        
+        if schedule_type == "linear":
+            return initial + alpha * (target - initial)
+        elif schedule_type == "exp":
+            # Interpolation in log space: log(y) = log(initial) + alpha * (log(target) - log(initial))
+            # Requires values > 0. If target or initial <= 0, fallback to linear.
+            if initial <= 1e-8 or target <= 1e-8:
+                return initial + alpha * (target - initial)
+            import math
+            return math.exp(math.log(initial) + alpha * (math.log(target) - math.log(initial)))
+        elif schedule_type == "cosine":
+            import math
+            return target + 0.5 * (initial - target) * (1 + math.cos(math.pi * alpha))
+            
+        return initial + alpha * (target - initial)
+
+    def _patched_construct_algorithm(self, obs):
+        entropy_cfg = self.alg_cfg.get("entropy_coef", None)
+        temp_entropy = None
+        if isinstance(entropy_cfg, dict):
+            temp_entropy = entropy_cfg
+            self.alg_cfg["entropy_coef"] = float(entropy_cfg.get("entropy_coef", 0.01))
+        alg = _OriginalConstructAlgorithm(self, obs)
+        if temp_entropy is not None:
+            self.alg_cfg["entropy_coef"] = temp_entropy
+            alg._entropy_schedule_cfg = temp_entropy
+            alg._entropy_schedule_total_iters = self.cfg.get("max_iterations", None)
+            alg._entropy_schedule_step = 0
+        else:
+            alg._entropy_schedule_cfg = None
+            alg._entropy_schedule_total_iters = None
+            alg._entropy_schedule_step = 0
+        return alg
+
+    def _patched_ppo_update(self):
+        cfg = getattr(self, "_entropy_schedule_cfg", None)
+        total_iters = getattr(self, "_entropy_schedule_total_iters", None)
+        step = getattr(self, "_entropy_schedule_step", 0)
+        if cfg is not None and total_iters is not None:
+            entropy_coef = _compute_entropy_coef_from_cfg(cfg, step, total_iters)
+            if entropy_coef is not None:
+                self.entropy_coef = entropy_coef
+            self._entropy_schedule_step = step + 1
+        return _OriginalPPOUpdate(self)
+
+    _rsl_runner_mod.OnPolicyRunner._construct_algorithm = _patched_construct_algorithm
+    _rsl_ppo.PPO.update = _patched_ppo_update
+    def _patched_log(self, locs, width: int = 80, pad: int = 35):
+        _OriginalLog(self, locs, width, pad)
+        try:
+            if self.log_dir is not None and not self.disable_logs and self.writer is not None:
+                entropy_val = float(getattr(self.alg, "entropy_coef", 0.0))
+                self.writer.add_scalar("Loss/entropy_coef", entropy_val, locs["it"])
+        except Exception:
+            pass
+    _rsl_runner_mod.OnPolicyRunner.log = _patched_log
+except Exception:
+    pass
+
 from isaaclab.envs import (
     DirectMARLEnv,
     DirectMARLEnvCfg,

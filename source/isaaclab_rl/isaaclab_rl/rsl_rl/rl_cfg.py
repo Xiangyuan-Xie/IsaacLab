@@ -10,6 +10,7 @@ from typing import Literal
 
 from isaaclab.utils import configclass
 
+from .entropy_coef_cfg import RslRlEntropyCoefCfg
 from .rnd_cfg import RslRlRndCfg
 from .symmetry_cfg import RslRlSymmetryCfg
 
@@ -183,7 +184,7 @@ class RslRlPpoAlgorithmCfg:
     lam: float = MISSING
     """The lambda parameter for Generalized Advantage Estimation (GAE)."""
 
-    entropy_coef: float = MISSING
+    entropy_coef: RslRlEntropyCoefCfg = MISSING
     """The coefficient for the entropy loss."""
 
     desired_kl: float = MISSING
