@@ -408,6 +408,33 @@ class TestV5:
         assert cfg.actor.distribution_cfg.init_std == 2.0
         assert cfg.actor.distribution_cfg.std_type == "log"
 
+    def test_keeps_existing_beta_distribution_cfg(self):
+        a = _mlp_model()
+        a.distribution_cfg = RslRlMLPModelCfg.BetaDistributionCfg(
+            init_concentration=6.0,
+            min_concentration=1e-4,
+            max_concentration=50.0,
+            eps=1e-5,
+        )
+        cfg = _on_policy_runner(algorithm=_ppo_algo(), actor=a)
+
+        handle_deprecated_rsl_rl_cfg(cfg, "5.0.0")
+
+        d = cfg.actor.distribution_cfg
+        assert isinstance(d, RslRlMLPModelCfg.BetaDistributionCfg)
+        assert cfg.to_dict()["actor"]["distribution_cfg"] == {
+            "class_name": "BetaDistribution",
+            "init_concentration": 6.0,
+            "min_concentration": 1e-4,
+            "max_concentration": 50.0,
+            "eps": 1e-5,
+        }
+        assert not hasattr(cfg.actor, "stochastic")
+
+    def test_beta_distribution_cfg_requires_explicit_parameters(self):
+        with pytest.raises(TypeError):
+            RslRlMLPModelCfg.BetaDistributionCfg()
+
     def test_non_stochastic_no_distribution(self):
         a = _mlp_model()
         a.stochastic = False

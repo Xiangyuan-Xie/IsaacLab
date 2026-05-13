@@ -64,6 +64,25 @@ class RslRlMLPModelCfg:
         class_name: str = "HeteroscedasticGaussianDistribution"
         """The distribution class name. Default is HeteroscedasticGaussianDistribution."""
 
+    @configclass
+    class BetaDistributionCfg(DistributionCfg):
+        """Configuration for the Beta output distribution."""
+
+        class_name: str = "BetaDistribution"
+        """The distribution class name. Default is BetaDistribution."""
+
+        init_concentration: float = MISSING
+        """The initial alpha+beta concentration of the output distribution."""
+
+        min_concentration: float = MISSING
+        """The minimum concentration used for numerical stability."""
+
+        max_concentration: float = MISSING
+        """The maximum concentration used for numerical stability."""
+
+        eps: float = MISSING
+        """The clamp margin for log-probability inputs at the open Beta support boundary."""
+
     stochastic: bool = MISSING
     """Whether the model output is stochastic.
 
