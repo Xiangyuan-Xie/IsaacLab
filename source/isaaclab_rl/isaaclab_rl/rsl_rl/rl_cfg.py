@@ -67,6 +67,15 @@ class RslRlMLPModelCfg:
         class_name: str = "HeteroscedasticGaussianDistribution"
         """The distribution class name. Default is HeteroscedasticGaussianDistribution."""
 
+    @configclass
+    class BetaDistributionCfg(DistributionCfg):
+        """Configuration for the Beta output distribution."""
+
+        class_name: str = "BetaDistribution"
+        """The distribution class name. Default is BetaDistribution."""
+
+        action_range: tuple[float, float] = (-1.0, 1.0)
+        """The output range for Beta actions. Defaults to (-1, 1)."""
 
 @configclass
 class RslRlRNNModelCfg(RslRlMLPModelCfg):
