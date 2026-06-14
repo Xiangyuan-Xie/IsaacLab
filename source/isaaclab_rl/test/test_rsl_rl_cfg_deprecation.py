@@ -41,6 +41,10 @@ def _ppo_algo():
     )
 
 
+def test_ppo_algorithm_cfg_does_not_expose_removed_lam_dyn():
+    assert not hasattr(_ppo_algo(), "lam_dyn")
+
+
 def _distillation_algo():
     return RslRlDistillationAlgorithmCfg(num_learning_epochs=5, learning_rate=1e-3, gradient_length=1)
 
@@ -410,12 +414,7 @@ class TestV5:
 
     def test_keeps_existing_beta_distribution_cfg(self):
         a = _mlp_model()
-        a.distribution_cfg = RslRlMLPModelCfg.BetaDistributionCfg(
-            init_concentration=6.0,
-            min_concentration=1e-4,
-            max_concentration=50.0,
-            eps=1e-5,
-        )
+        a.distribution_cfg = RslRlMLPModelCfg.BetaDistributionCfg(action_range=(0.0, 1.0))
         cfg = _on_policy_runner(algorithm=_ppo_algo(), actor=a)
 
         handle_deprecated_rsl_rl_cfg(cfg, "5.0.0")
@@ -424,16 +423,13 @@ class TestV5:
         assert isinstance(d, RslRlMLPModelCfg.BetaDistributionCfg)
         assert cfg.to_dict()["actor"]["distribution_cfg"] == {
             "class_name": "BetaDistribution",
-            "init_concentration": 6.0,
-            "min_concentration": 1e-4,
-            "max_concentration": 50.0,
-            "eps": 1e-5,
+            "action_range": (0.0, 1.0),
         }
         assert not hasattr(cfg.actor, "stochastic")
 
-    def test_beta_distribution_cfg_requires_explicit_parameters(self):
-        with pytest.raises(TypeError):
-            RslRlMLPModelCfg.BetaDistributionCfg()
+    def test_beta_distribution_cfg_defaults_to_upstream_action_range(self):
+        cfg = RslRlMLPModelCfg.BetaDistributionCfg()
+        assert cfg.action_range == (-1.0, 1.0)
 
     def test_non_stochastic_no_distribution(self):
         a = _mlp_model()

@@ -38,6 +38,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _globify_contact_sensor_path(path_expr: str) -> str:
+    """Convert IsaacLab regex path expressions to ovphysx fnmatch glob syntax."""
+    return re.sub(r"\.\*", "*", re.sub(r"\{ENV_REGEX_NS\}", "*", path_expr))
+
+
 class ContactSensor(BaseContactSensor):
     """An ovphysx contact reporting sensor.
 
@@ -190,21 +195,53 @@ class ContactSensor(BaseContactSensor):
         # library is loaded by ``omni.physx``.  The unfiltered API matches what
         # the underlying USD apiSchemas listOp actually carries (verified against
         # :class:`pxr.Sdf.PrimSpec.GetInfo("apiSchemas")`).
-        parent_expr, leaf_pattern = self.cfg.prim_path.rsplit("/", 1)
-        name_pattern = re.compile(leaf_pattern)
-
         def has_contact_report(prim) -> bool:
-            return bool(name_pattern.fullmatch(prim.GetName())) and (
-                "PhysxContactReportAPI" in prim.GetPrimTypeInfo().GetAppliedAPISchemas()
-            )
+            return "PhysxContactReportAPI" in prim.GetPrimTypeInfo().GetAppliedAPISchemas()
 
-        matches = resolve_matching_prims_from_source(parent_expr)
-        if not matches:
-            raise RuntimeError(f"No prim found at '{parent_expr}'.")
-        asset_prim, body_parent = matches[0]
-        walk_root = asset_prim.GetPath().pathString
-        prims = get_all_matching_child_prims(walk_root, predicate=has_contact_report, traverse_instance_prims=False)
-        body_names = [prim.GetPath().pathString.rsplit("/", 1)[-1] for prim in prims]
+        # Prefer resolving the configured path itself. Generated USDs may contain a rigid body prim with a
+        # same-named instanceable child mesh (for example ``Geometry/base_link/base_link``); binding by leaf
+        # name alone can pick the child instead of the rigid body.
+        is_recursive_path = self.cfg.prim_path.endswith("/**")
+        if is_recursive_path:
+            recursive_root_expr = self.cfg.prim_path[: -len("/**")]
+            root_matches = resolve_matching_prims_from_source(
+                recursive_root_expr, predicate=None, raise_if_no_matches=False
+            )
+            prim_matches = []
+            for root_prim, root_expr in root_matches:
+                root_path = root_prim.GetPath().pathString
+                if has_contact_report(root_prim):
+                    prim_matches.append((root_prim, root_expr))
+                for prim in get_all_matching_child_prims(
+                    root_path, predicate=has_contact_report, traverse_instance_prims=False
+                ):
+                    if prim.GetPath() == root_prim.GetPath():
+                        continue
+                    rel_path = prim.GetPath().pathString[len(root_path) :].lstrip("/")
+                    prim_matches.append((prim, f"{root_expr}/{rel_path}"))
+        else:
+            prim_matches = resolve_matching_prims_from_source(
+                self.cfg.prim_path, predicate=has_contact_report, raise_if_no_matches=False
+            )
+        if not prim_matches and not is_recursive_path:
+            parent_expr, leaf_pattern = self.cfg.prim_path.rsplit("/", 1)
+            name_pattern = re.compile(leaf_pattern)
+
+            def child_has_contact_report(prim) -> bool:
+                return bool(name_pattern.fullmatch(prim.GetName())) and has_contact_report(prim)
+
+            asset_prim, body_parent = resolve_matching_prims_from_source(parent_expr)[0]
+            walk_root = asset_prim.GetPath().pathString
+            prims = get_all_matching_child_prims(
+                walk_root, predicate=child_has_contact_report, traverse_instance_prims=False
+            )
+            prim_matches = []
+            for prim in prims:
+                rel_path = prim.GetPath().pathString[len(walk_root) :].lstrip("/")
+                path_expr = body_parent if not rel_path else f"{body_parent}/{rel_path}"
+                prim_matches.append((prim, path_expr))
+
+        body_names = [prim.GetPath().pathString.rsplit("/", 1)[-1] for prim, _ in prim_matches]
         if not body_names:
             raise RuntimeError(
                 f"Sensor at path '{self.cfg.prim_path}' could not find any bodies with contact reporter API."
@@ -215,9 +252,7 @@ class ContactSensor(BaseContactSensor):
 
         # Build glob patterns: one per (env, sensor body).
         # IsaacLab path forms map to ovphysx fnmatch globs the same way Articulation does.
-        base_glob = re.sub(r"\{ENV_REGEX_NS\}", "*", body_parent)
-        base_glob = re.sub(r"\.\*", "*", base_glob)
-        sensor_patterns = [f"{base_glob}/{name}" for name in body_names]
+        sensor_patterns = [_globify_contact_sensor_path(path_expr) for _, path_expr in prim_matches]
 
         # Build filter patterns (flat: len = n_sensors * filters_per_sensor).
         filter_globs = [
@@ -282,7 +317,7 @@ class ContactSensor(BaseContactSensor):
                     f"under '{self.cfg.prim_path}').  Workaround: create one ContactSensor "
                     "per body."
                 )
-            single_pose_pattern = f"{base_glob}/{body_names[0]}"
+            single_pose_pattern = sensor_patterns[0]
             self._pose_binding = physx_instance.create_tensor_binding(
                 pattern=single_pose_pattern,
                 tensor_type=TT.RIGID_BODY_POSE,

@@ -790,19 +790,20 @@ class SimulationContext:
                 flag is False — cameras and the Kit app loop are skipped, but standalone visualizers
                 (Newton, Rerun, Viser) still receive updates.
         """
-        if not self._visualizers:
-            return
-
         for viz in self._visualizers:
             viz.flush_startup_messages()
 
         if self._should_forward_before_visualizer_update():
             self.physics_manager.forward()
 
-        # Marker callbacks update VisualizationMarkers state; visualizer step()
-        # consumes that state later in this method.
-        if any(viz.supports_markers() for viz in self._visualizers):
+        # Marker callbacks update VisualizationMarkers state. They also need to
+        # run for headless rgb-array video: there may be no active visualizer,
+        # but Kit/Replicator still renders the USD PointInstancer markers.
+        if self._should_dispatch_marker_callbacks():
             self.vis_marker_registry.dispatch_callbacks()
+
+        if not self._visualizers:
+            return
 
         visualizers_to_remove = []
         for viz in self._visualizers:
@@ -842,6 +843,10 @@ class SimulationContext:
     def _should_forward_before_visualizer_update(self) -> bool:
         """Return True if any visualizer requires pre-step forward kinematics."""
         return any(viz.requires_forward_before_step() for viz in self._visualizers)
+
+    def _should_dispatch_marker_callbacks(self) -> bool:
+        """Return True when marker callbacks should refresh VisualizationMarkers state."""
+        return self.is_rendering or any(viz.supports_markers() for viz in self._visualizers)
 
     def play(self) -> None:
         """Start or resume the simulation."""

@@ -104,7 +104,7 @@ class UrdfConverter(AssetConverterBase):
             joint_target_type=target_type,
             override_joint_stiffness=stiffness,
             override_joint_damping=damping,
-            run_asset_transformer=cfg.run_asset_transformer,
+            run_asset_transformer=cfg.run_asset_transformer and cfg.make_instanceable,
             run_multi_physics_conversion=cfg.run_multi_physics_conversion,
             debug_mode=cfg.debug_mode,
         )

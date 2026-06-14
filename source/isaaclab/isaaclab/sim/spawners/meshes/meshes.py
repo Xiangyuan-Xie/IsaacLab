@@ -16,7 +16,7 @@ from pxr import Usd, UsdPhysics
 from isaaclab.sim import schemas
 from isaaclab.sim.utils import bind_physics_material, bind_visual_material, clone, create_prim, get_current_stage
 
-from ..materials import DeformableBodyMaterialBaseCfg, RigidBodyMaterialCfg, SurfaceDeformableBodyMaterialBaseCfg
+from ..materials import DeformableBodyMaterialBaseCfg, RigidBodyMaterialBaseCfg, SurfaceDeformableBodyMaterialBaseCfg
 
 if TYPE_CHECKING:
     from . import meshes_cfg
@@ -367,7 +367,7 @@ def _spawn_mesh_geom_from_mesh(
         if not isinstance(cfg.physics_material, DeformableBodyMaterialBaseCfg):
             raise ValueError("Deformable properties require a deformable physics material.")
     if cfg.rigid_props is not None and cfg.physics_material is not None:
-        if not isinstance(cfg.physics_material, RigidBodyMaterialCfg):
+        if not isinstance(cfg.physics_material, RigidBodyMaterialBaseCfg):
             raise ValueError("Rigid properties require a rigid physics material.")
 
     # create all the paths we need for clarity

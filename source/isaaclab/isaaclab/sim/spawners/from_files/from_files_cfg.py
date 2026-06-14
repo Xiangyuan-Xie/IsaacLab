@@ -8,6 +8,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import MISSING
 
+from isaaclab_physx.sim.spawners.materials import PhysxRigidBodyMaterialCfg
+
 from isaaclab.sim import converters, schemas
 from isaaclab.sim.spawners import materials
 from isaaclab.sim.spawners.spawner_cfg import DeformableObjectSpawnerCfg, RigidObjectSpawnerCfg, SpawnerCfg
@@ -227,5 +229,5 @@ class GroundPlaneCfg(SpawnerCfg):
     size: tuple[float, float] = (100.0, 100.0)
     """The size of the ground plane. Defaults to 100 m x 100 m."""
 
-    physics_material: materials.RigidBodyMaterialCfg = materials.RigidBodyMaterialCfg()
+    physics_material: PhysxRigidBodyMaterialCfg = PhysxRigidBodyMaterialCfg()
     """Physics material properties. Defaults to the default rigid body material."""

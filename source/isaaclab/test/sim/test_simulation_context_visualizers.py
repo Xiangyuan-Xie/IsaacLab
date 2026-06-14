@@ -121,12 +121,34 @@ class _FakeVisualizer:
         pass
 
 
-def _make_context(visualizers, provider=None):
+class _FakeMarkerRegistry:
+    def __init__(self):
+        self.dispatch_calls = 0
+
+    def dispatch_callbacks(self):
+        self.dispatch_calls += 1
+
+
+def _make_context(visualizers, provider=None, *, rendering: bool = False):
     ctx = object.__new__(SimulationContext)
     ctx._visualizers = list(visualizers)
     ctx._scene_data_provider = provider
     ctx.physics_manager = _FakePhysicsManager()
+    ctx.vis_marker_registry = _FakeMarkerRegistry()
+    ctx._has_gui = False
+    ctx._has_offscreen_render = rendering
+    ctx._xr_enabled = False
+    ctx.get_setting = lambda name: False
+    ctx.resolve_visualizer_types = lambda: []
     return ctx
+
+
+def test_update_visualizers_dispatches_marker_callbacks_when_rendering_without_visualizers():
+    ctx = _make_context([], rendering=True)
+
+    ctx.update_visualizers(0.1)
+
+    assert ctx.vis_marker_registry.dispatch_calls == 1
 
 
 def test_update_visualizers_runs_forward_when_a_visualizer_requires_it():

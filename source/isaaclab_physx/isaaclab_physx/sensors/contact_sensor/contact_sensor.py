@@ -38,6 +38,18 @@ if TYPE_CHECKING:
     from isaaclab.sensors.contact_sensor import ContactSensorCfg
 
 
+def _globify_contact_sensor_path(path_expr: str) -> str:
+    """Convert IsaacLab regex path expressions to PhysX tensor-view glob syntax."""
+    return path_expr.replace("{ENV_REGEX_NS}", "*").replace(".*", "*")
+
+
+def _filter_patterns_for_contact_view(sensor_patterns: list[str], filter_patterns: list[str]) -> list[list[str]]:
+    """Expand shared filter patterns to the per-sensor form expected by PhysX."""
+    if not filter_patterns:
+        return []
+    return [list(filter_patterns) for _ in sensor_patterns]
+
+
 class ContactSensor(BaseContactSensor):
     """A PhysX contact reporting sensor.
 
@@ -290,40 +302,70 @@ class ContactSensor(BaseContactSensor):
         # obtain global simulation view
         self._physics_sim_view = SimulationManager.get_physics_sim_view()
 
-        # Split the configured prim path into a parent expression and a leaf-name regex.
-        parent_expr, leaf_pattern = self.cfg.prim_path.rsplit("/", 1)
-        name_pattern = re.compile(leaf_pattern)
-
         def has_contact_report(prim) -> bool:
-            return bool(name_pattern.fullmatch(prim.GetName())) and (
-                "PhysxContactReportAPI" in prim.GetAppliedSchemas()
-            )
+            applied_schemas = prim.GetAppliedSchemas()
+            return "PhysicsRigidBodyAPI" in applied_schemas and "PhysxContactReportAPI" in applied_schemas
 
-        # Resolve the asset subtree (clone-plan aware) and collect contact-reporting descendants.
-        matches = resolve_matching_prims_from_source(parent_expr)
-        if not matches:
-            raise RuntimeError(f"No prim found at '{parent_expr}'.")
-        asset_prim, body_parent = matches[0]
-        walk_root = asset_prim.GetPath().pathString
-        prims = get_all_matching_child_prims(walk_root, predicate=has_contact_report, traverse_instance_prims=False)
-        body_names = [prim.GetPath().pathString.rsplit("/", 1)[-1] for prim in prims]
+        # Prefer resolving the configured path itself. Some generated USDs contain an intermediate rigid body
+        # prim with an instanceable child of the same leaf name (for example ``Geometry/base_link/base_link``).
+        # Starting discovery from the parent and then appending only leaf names can accidentally bind the child
+        # mesh prim instead of the rigid body prim.
+        is_recursive_path = self.cfg.prim_path.endswith("/**")
+        if is_recursive_path:
+            recursive_root_expr = self.cfg.prim_path[: -len("/**")]
+            root_matches = resolve_matching_prims_from_source(
+                recursive_root_expr, predicate=None, raise_if_no_matches=False
+            )
+            prim_matches = []
+            for root_prim, root_expr in root_matches:
+                root_path = root_prim.GetPath().pathString
+                if has_contact_report(root_prim):
+                    prim_matches.append((root_prim, root_expr))
+                for prim in get_all_matching_child_prims(
+                    root_path, predicate=has_contact_report, traverse_instance_prims=False
+                ):
+                    if prim.GetPath() == root_prim.GetPath():
+                        continue
+                    rel_path = prim.GetPath().pathString[len(root_path) :].lstrip("/")
+                    prim_matches.append((prim, f"{root_expr}/{rel_path}"))
+        else:
+            prim_matches = resolve_matching_prims_from_source(
+                self.cfg.prim_path, predicate=has_contact_report, raise_if_no_matches=False
+            )
+        if not prim_matches and not is_recursive_path:
+            parent_expr, leaf_pattern = self.cfg.prim_path.rsplit("/", 1)
+            name_pattern = re.compile(leaf_pattern)
+
+            def child_has_contact_report(prim) -> bool:
+                return bool(name_pattern.fullmatch(prim.GetName())) and has_contact_report(prim)
+
+            # Resolve the asset subtree (clone-plan aware) and collect contact-reporting descendants.
+            asset_prim, body_parent = resolve_matching_prims_from_source(parent_expr)[0]
+            walk_root = asset_prim.GetPath().pathString
+            prims = get_all_matching_child_prims(
+                walk_root, predicate=child_has_contact_report, traverse_instance_prims=False
+            )
+            prim_matches = []
+            for prim in prims:
+                rel_path = prim.GetPath().pathString[len(walk_root) :].lstrip("/")
+                path_expr = body_parent if not rel_path else f"{body_parent}/{rel_path}"
+                prim_matches.append((prim, path_expr))
+
+        body_names = [prim.GetPath().pathString.rsplit("/", 1)[-1] for prim, _ in prim_matches]
         if not body_names:
             raise RuntimeError(
                 f"Sensor at path '{self.cfg.prim_path}' could not find any bodies with contact reporter API."
                 "\nHINT: Make sure to enable 'activate_contact_sensors' in the corresponding asset spawn configuration."
             )
 
-        # construct regex expression for the body names and convert to PhysX glob form
-        body_names_regex = r"(" + "|".join(body_names) + r")"
-        body_names_regex = f"{body_parent}/{body_names_regex}"
-        body_names_glob = body_names_regex.replace(".*", "*")
-        filter_prim_paths_glob = [expr.replace(".*", "*") for expr in self.cfg.filter_prim_paths_expr]
-
+        body_names_glob = [_globify_contact_sensor_path(path_expr) for _, path_expr in prim_matches]
+        filter_prim_paths_glob = [_globify_contact_sensor_path(expr) for expr in self.cfg.filter_prim_paths_expr]
+        filter_prim_paths_for_view = _filter_patterns_for_contact_view(body_names_glob, filter_prim_paths_glob)
         # create a rigid prim view for the sensor
         self._body_physx_view = self._physics_sim_view.create_rigid_body_view(body_names_glob)
         self._contact_view = self._physics_sim_view.create_rigid_contact_view(
             body_names_glob,
-            filter_patterns=filter_prim_paths_glob,
+            filter_patterns=filter_prim_paths_for_view,
             max_contact_data_count=self.cfg.max_contact_data_count_per_prim * len(body_names) * self._num_envs,
         )
         # resolve the true count of bodies

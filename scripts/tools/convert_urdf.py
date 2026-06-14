@@ -65,6 +65,40 @@ parser.add_argument(
     choices=["position", "velocity", "none"],
     help="The type of control to use for the joint drive.",
 )
+parser.add_argument(
+    "--collision-from-visuals",
+    action="store_true",
+    default=False,
+    help="Generate collision geometry from visual geometries.",
+)
+parser.add_argument(
+    "--collision-type",
+    type=str,
+    default="Convex Hull",
+    choices=["Convex Hull", "Convex Decomposition", "Bounding Sphere", "Bounding Cube"],
+    help="The collision geometry type to use when generating collisions from visual geometries.",
+)
+instanceable_group = parser.add_mutually_exclusive_group()
+instanceable_group.add_argument(
+    "--make-instanceable",
+    dest="make_instanceable",
+    action="store_true",
+    default=True,
+    help="Make the generated USD instanceable.",
+)
+instanceable_group.add_argument(
+    "--no-make-instanceable",
+    dest="make_instanceable",
+    action="store_false",
+    help="Generate a flat USD without instanceable mesh references.",
+)
+parser.add_argument(
+    "--ros-package-path",
+    action="append",
+    default=[],
+    metavar="NAME=PATH",
+    help="ROS package mapping for package:// URI resolution. Can be passed multiple times.",
+)
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -98,6 +132,14 @@ def main():
     dest_path = args_cli.output
     if not os.path.isabs(dest_path):
         dest_path = os.path.abspath(dest_path)
+    ros_package_paths = []
+    for package_mapping in args_cli.ros_package_path:
+        if "=" not in package_mapping:
+            raise ValueError(f"Invalid ROS package mapping: {package_mapping}. Expected NAME=PATH.")
+        package_name, package_path = package_mapping.split("=", maxsplit=1)
+        if not package_name or not package_path:
+            raise ValueError(f"Invalid ROS package mapping: {package_mapping}. Expected NAME=PATH.")
+        ros_package_paths.append({"name": package_name, "path": os.path.abspath(package_path)})
 
     # Create Urdf converter config
     # Note: usd_file_name is determined by the URDF importer 3.0 based on the robot name
@@ -108,6 +150,7 @@ def main():
         fix_base=args_cli.fix_base,
         merge_fixed_joints=args_cli.merge_joints,
         force_usd_conversion=True,
+        make_instanceable=args_cli.make_instanceable,
         joint_drive=UrdfConverterCfg.JointDriveCfg(
             gains=UrdfConverterCfg.JointDriveCfg.PDGainsCfg(
                 stiffness=args_cli.joint_stiffness,
@@ -115,8 +158,10 @@ def main():
             ),
             target_type=args_cli.joint_target_type,
         ),
-        collider_type="convex_decomposition",
+        collision_from_visuals=args_cli.collision_from_visuals,
+        collision_type=args_cli.collision_type,
         self_collision=True,
+        ros_package_paths=ros_package_paths,
     )
 
     # Print info

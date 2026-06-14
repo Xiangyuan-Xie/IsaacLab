@@ -71,17 +71,8 @@ class RslRlMLPModelCfg:
         class_name: str = "BetaDistribution"
         """The distribution class name. Default is BetaDistribution."""
 
-        init_concentration: float = MISSING
-        """The initial alpha+beta concentration of the output distribution."""
-
-        min_concentration: float = MISSING
-        """The minimum concentration used for numerical stability."""
-
-        max_concentration: float = MISSING
-        """The maximum concentration used for numerical stability."""
-
-        eps: float = MISSING
-        """The clamp margin for log-probability inputs at the open Beta support boundary."""
+        action_range: tuple[float, float] = (-1.0, 1.0)
+        """The output range for Beta actions. Defaults to (-1, 1)."""
 
     stochastic: bool = MISSING
     """Whether the model output is stochastic.
@@ -127,6 +118,9 @@ class RslRlRNNModelCfg(RslRlMLPModelCfg):
 
     rnn_num_layers: int = MISSING
     """The number of RNN layers."""
+
+    structure: Literal["gru_mlp", "mlp_gru"] = "gru_mlp"
+    """The model ordering. ``gru_mlp`` is upstream RSL-RL default; ``mlp_gru`` applies an MLP encoder before the RNN."""
 
 
 @configclass

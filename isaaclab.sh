@@ -26,7 +26,11 @@ else
 fi
 
 # Add source/isaaclab to PYTHONPATH so we can import isaaclab.cli.
-export PYTHONPATH="$ISAACLAB_PATH/source/isaaclab:$PYTHONPATH"
+if [ -n "${PYTHONPATH:-}" ]; then
+    export PYTHONPATH="$ISAACLAB_PATH/source/isaaclab:$PYTHONPATH"
+else
+    export PYTHONPATH="$ISAACLAB_PATH/source/isaaclab"
+fi
 
 # Let Kit associate direct wrapper launches with the Isaac Sim desktop icon.
 export RESOURCE_NAME="${RESOURCE_NAME:-IsaacSim}"
@@ -38,8 +42,53 @@ if [ -d "$ISAACLAB_PATH/_isaac_sim" ]; then
     if [ -f "$ISAACLAB_PATH/_isaac_sim/setup_conda_env.sh" ]; then
         # shellcheck disable=SC1091
         . "$ISAACLAB_PATH/_isaac_sim/setup_conda_env.sh" >/dev/null 2>&1 || true
+    elif [ -f "$ISAACLAB_PATH/_isaac_sim/setup_python_env.sh" ]; then
+        export CARB_APP_PATH="$ISAACLAB_PATH/_isaac_sim/kit"
+        export ISAAC_PATH="$ISAACLAB_PATH/_isaac_sim"
+        export EXP_PATH="$ISAACLAB_PATH/_isaac_sim/apps"
+
+        _isaaclab_source_setup_python_env() {
+            if [ -n "${ZSH_VERSION:-}" ]; then
+                emulate -L zsh -o KSH_ARRAYS
+                typeset -a BASH_SOURCE
+                BASH_SOURCE=("$ISAACLAB_PATH/_isaac_sim/setup_python_env.sh")
+            fi
+            # shellcheck disable=SC1091
+            . "$ISAACLAB_PATH/_isaac_sim/setup_python_env.sh"
+        }
+        _isaaclab_source_setup_python_env
+        unset -f _isaaclab_source_setup_python_env
+
+        _isaaclab_strip_path_entries() {
+            if [ -n "${ZSH_VERSION:-}" ]; then
+                emulate -L sh
+            fi
+            _isaaclab_var_name="$1"
+            _isaaclab_reject_prefix="$2"
+            eval "_isaaclab_path_value=\${$_isaaclab_var_name-}"
+            _isaaclab_new_path=""
+            _isaaclab_old_ifs="$IFS"
+            IFS=":"
+            for _isaaclab_entry in $_isaaclab_path_value; do
+                [ -z "$_isaaclab_entry" ] && continue
+                case "$_isaaclab_entry" in
+                    "$_isaaclab_reject_prefix"|$_isaaclab_reject_prefix/*) continue ;;
+                esac
+                if [ -n "$_isaaclab_new_path" ]; then
+                    _isaaclab_new_path="$_isaaclab_new_path:$_isaaclab_entry"
+                else
+                    _isaaclab_new_path="$_isaaclab_entry"
+                fi
+            done
+            IFS="$_isaaclab_old_ifs"
+            export "$_isaaclab_var_name=$_isaaclab_new_path"
+            unset _isaaclab_var_name _isaaclab_reject_prefix _isaaclab_path_value
+            unset _isaaclab_new_path _isaaclab_old_ifs _isaaclab_entry
+        }
+        _isaaclab_strip_path_entries PYTHONPATH "$ISAACLAB_PATH/_isaac_sim/kit/python/lib/python3.12"
+        unset -f _isaaclab_strip_path_entries
     else
-        echo "[WARNING] _isaac_sim is present but _isaac_sim/setup_conda_env.sh is missing; Isaac Sim env vars not exported." >&2
+        echo "[WARNING] _isaac_sim is present but no supported Isaac Sim env setup script was found; Isaac Sim env vars not exported." >&2
         echo "[WARNING] Re-extract the Isaac Sim binary zip if you intend to use the bundled binary." >&2
     fi
 fi

@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import contextlib
+import importlib.util
 import logging
 import os
 import re
@@ -276,6 +277,8 @@ class AppLauncher:
                 )
             launcher_args.update(kwargs)
 
+        AppLauncher._ensure_simulation_app_importable()
+
         # Preserve the Python logging intent before Kit installs its own logging bridge.
         self._python_logging_level = AppLauncher._resolve_python_logging_level(launcher_args)
 
@@ -373,6 +376,25 @@ class AppLauncher:
     """
     Operations.
     """
+
+    @staticmethod
+    def _ensure_simulation_app_importable() -> None:
+        """Ensure Isaac Sim modules are importable before resolving launcher configuration."""
+        if "SimulationApp" in globals():
+            return
+
+        try:
+            import isaacsim as isaacsim_module
+            from isaacsim import SimulationApp as simulation_app_cls
+        except ImportError as exc:
+            raise RuntimeError(
+                "Isaac Sim Python modules are not importable. Ensure the Isaac Sim environment hook is current "
+                "and exports ISAAC_PATH, EXP_PATH, and the Isaac Sim python_packages/ext paths before creating "
+                "AppLauncher."
+            ) from exc
+
+        globals()["isaacsim"] = isaacsim_module
+        globals()["SimulationApp"] = simulation_app_cls
 
     @staticmethod
     def add_app_launcher_args(parser: argparse.ArgumentParser) -> None:
@@ -1348,14 +1370,13 @@ class AppLauncher:
 
     def is_isaac_sim_version_5(self) -> bool:
         if not hasattr(self, "_is_sim_ver_5"):
-            # 1) Try to read the VERSION file (for manual / binary installs)
-            version_path = os.path.abspath(os.path.join(os.path.dirname(isaacsim.__file__), "../../VERSION"))
-            if os.path.isfile(version_path):
-                with open(version_path) as f:
-                    ver = f.readline().strip()
-                    if ver.startswith("5"):
-                        self._is_sim_ver_5 = True
-                        return True
+            # 1) Try to read the VERSION file (for manual / binary installs).
+            # ``isaacsim`` may be unavailable if the shell hook is stale or misconfigured,
+            # so avoid depending on the module global when resolving the binary root.
+            version = self._read_isaac_sim_version_from_file()
+            if version is not None:
+                self._is_sim_ver_5 = version.startswith("5")
+                return self._is_sim_ver_5
 
             # 2) Fall back to metadata (for pip installs)
             from importlib.metadata import version as pkg_version
@@ -1369,6 +1390,42 @@ class AppLauncher:
             except Exception:
                 self._is_sim_ver_5 = False
         return self._is_sim_ver_5
+
+    @staticmethod
+    def _read_isaac_sim_version_from_file() -> str | None:
+        """Read Isaac Sim's VERSION file from import metadata or known binary install paths."""
+        version_paths = []
+
+        isaacsim_module = globals().get("isaacsim")
+        if isaacsim_module is not None and getattr(isaacsim_module, "__file__", None):
+            version_paths.append(
+                os.path.abspath(os.path.join(os.path.dirname(isaacsim_module.__file__), "../../VERSION"))
+            )
+
+        isaacsim_spec = importlib.util.find_spec("isaacsim")
+        if isaacsim_spec is not None and isaacsim_spec.origin:
+            version_paths.append(os.path.abspath(os.path.join(os.path.dirname(isaacsim_spec.origin), "../../VERSION")))
+
+        for env_var in ("ISAAC_PATH", "EXP_PATH"):
+            env_path = os.environ.get(env_var)
+            if env_path:
+                root = os.path.dirname(env_path) if env_var == "EXP_PATH" else env_path
+                version_paths.append(os.path.join(root, "VERSION"))
+
+        isaaclab_binary_version = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), *[".."] * 4, "_isaac_sim", "VERSION")
+        )
+        version_paths.append(isaaclab_binary_version)
+
+        seen = set()
+        for version_path in version_paths:
+            if version_path in seen:
+                continue
+            seen.add(version_path)
+            if os.path.isfile(version_path):
+                with open(version_path) as f:
+                    return f.readline().strip()
+        return None
 
     def _hide_play_button(self, flag):
         """Hide/Unhide the play button in the toolbar.

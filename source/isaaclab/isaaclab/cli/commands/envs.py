@@ -82,6 +82,56 @@ def _get_conda_prefix(env_name: str) -> Path | None:
     return None
 
 
+def _isaacsim_python_env_shell(isaacsim_root: Path, setup_python_env_script: Path) -> str:
+    """Return shell code that sources Isaac Sim's env script without leaking Kit's stdlib."""
+    return textwrap.dedent(
+        f"""\
+        export CARB_APP_PATH="{isaacsim_root / "kit"}"
+        export ISAAC_PATH="{isaacsim_root}"
+        export EXP_PATH="{isaacsim_root / "apps"}"
+        _isaaclab_source_setup_python_env() {{
+            if [ -n "${{ZSH_VERSION:-}}" ]; then
+                emulate -L zsh -o KSH_ARRAYS
+                typeset -a BASH_SOURCE
+                BASH_SOURCE=("{setup_python_env_script}")
+            fi
+            . "{setup_python_env_script}"
+        }}
+        _isaaclab_source_setup_python_env
+        unset -f _isaaclab_source_setup_python_env
+
+        _isaaclab_strip_path_entries() {{
+            if [ -n "${{ZSH_VERSION:-}}" ]; then
+                emulate -L sh
+            fi
+            _isaaclab_var_name="$1"
+            _isaaclab_reject_prefix="$2"
+            eval "_isaaclab_path_value=\\${{$_isaaclab_var_name-}}"
+            _isaaclab_new_path=""
+            _isaaclab_old_ifs="$IFS"
+            IFS=":"
+            for _isaaclab_entry in $_isaaclab_path_value; do
+                [ -z "$_isaaclab_entry" ] && continue
+                case "$_isaaclab_entry" in
+                    "$_isaaclab_reject_prefix"|$_isaaclab_reject_prefix/*) continue ;;
+                esac
+                if [ -n "$_isaaclab_new_path" ]; then
+                    _isaaclab_new_path="$_isaaclab_new_path:$_isaaclab_entry"
+                else
+                    _isaaclab_new_path="$_isaaclab_entry"
+                fi
+            done
+            IFS="$_isaaclab_old_ifs"
+            export "$_isaaclab_var_name=$_isaaclab_new_path"
+            unset _isaaclab_var_name _isaaclab_reject_prefix _isaaclab_path_value
+            unset _isaaclab_new_path _isaaclab_old_ifs _isaaclab_entry
+        }}
+        _isaaclab_strip_path_entries PYTHONPATH "{isaacsim_root / "kit" / "python" / "lib" / "python3.12"}"
+        unset -f _isaaclab_strip_path_entries
+        """
+    ).rstrip()
+
+
 def _create_conda_envhooks_shell(conda_prefix: Path) -> None:
     """Write Linux/Mac conda activation/deactivation hooks for Isaac Lab environment variables.
 
@@ -95,7 +145,10 @@ def _create_conda_envhooks_shell(conda_prefix: Path) -> None:
 
     activate_hook = activate_d / "setenv.sh"
     deactivate_hook = deactivate_d / "unsetenv.sh"
-    isaacsim_setup_conda_env_script = ISAACLAB_ROOT / "_isaac_sim" / "setup_conda_env.sh"
+    isaacsim_root = ISAACLAB_ROOT / "_isaac_sim"
+    isaacsim_setup_conda_env_script = isaacsim_root / "setup_conda_env.sh"
+    isaacsim_setup_python_env_script = isaacsim_root / "setup_python_env.sh"
+    isaacsim_python_env_shell = _isaacsim_python_env_shell(isaacsim_root, isaacsim_setup_python_env_script)
 
     activate_content = textwrap.dedent(
         f"""\
@@ -113,12 +166,14 @@ def _create_conda_envhooks_shell(conda_prefix: Path) -> None:
         # for Isaac Sim
         if [ -f "{isaacsim_setup_conda_env_script}" ]; then
             source "{isaacsim_setup_conda_env_script}"
+        elif [ -f "{isaacsim_setup_python_env_script}" ]; then
+            {isaacsim_python_env_shell}
         fi
         """
     )
 
     deactivate_content = textwrap.dedent(
-        f"""\
+        """\
         #!/usr/bin/env bash
 
         # for Isaac Lab
@@ -137,11 +192,9 @@ def _create_conda_envhooks_shell(conda_prefix: Path) -> None:
 
         # for Isaac Sim
         unset RESOURCE_NAME
-        if [ -f "{isaacsim_setup_conda_env_script}" ]; then
-            unset CARB_APP_PATH
-            unset EXP_PATH
-            unset ISAAC_PATH
-        fi
+        unset CARB_APP_PATH
+        unset EXP_PATH
+        unset ISAAC_PATH
         """
     )
 
@@ -407,7 +460,10 @@ def _create_uv_envhooks_shell(env_path: Path) -> None:
         env_path: Root path of the uv environment.
     """
     activate_script = env_path / "bin" / "activate"
-    isaacsim_setup_conda_env_script = ISAACLAB_ROOT / "_isaac_sim" / "setup_conda_env.sh"
+    isaacsim_root = ISAACLAB_ROOT / "_isaac_sim"
+    isaacsim_setup_conda_env_script = isaacsim_root / "setup_conda_env.sh"
+    isaacsim_setup_python_env_script = isaacsim_root / "setup_python_env.sh"
+    isaacsim_python_env_shell = _isaacsim_python_env_shell(isaacsim_root, isaacsim_setup_python_env_script)
 
     hook_content = textwrap.dedent(
         f"""\
@@ -418,6 +474,8 @@ def _create_uv_envhooks_shell(env_path: Path) -> None:
 
         if [ -f "{isaacsim_setup_conda_env_script}" ]; then
             . "{isaacsim_setup_conda_env_script}"
+        elif [ -f "{isaacsim_setup_python_env_script}" ]; then
+            {isaacsim_python_env_shell}
         fi
         # <<< Isaac Lab hook <<<
         """
