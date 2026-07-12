@@ -53,6 +53,26 @@ class PreTrainedPolicyAction(ActionTerm):
         self._low_level_action_term: ActionTerm = cfg.low_level_actions.class_type(cfg.low_level_actions, env)
         self.low_level_actions = torch.zeros(self.num_envs, self._low_level_action_term.action_dim, device=self.device)
 
+        if cfg.recurrent_state_shape is None:
+            self._policy_state = None
+        else:
+            num_layers, hidden_size = cfg.recurrent_state_shape
+            if num_layers <= 0 or hidden_size <= 0:
+                raise ValueError("recurrent_state_shape values must be positive.")
+            self._policy_state = torch.zeros(num_layers, self.num_envs, hidden_size, device=self.device)
+
+        self._bind_low_level_observations()
+
+        # add the low level observations to the observation manager
+        self._low_level_obs_manager = ObservationManager({"ll_policy": cfg.low_level_observations}, env)
+
+        self._counter = 0
+
+    def _bind_low_level_observations(self) -> None:
+        """Bind navigation observations to the policy command and nested action buffers."""
+        cfg = self.cfg
+        env = self._env
+
         def last_action():
             # reset the low level actions if the episode was reset
             if hasattr(env, "episode_length_buf"):
@@ -65,18 +85,13 @@ class PreTrainedPolicyAction(ActionTerm):
         cfg.low_level_observations.velocity_commands.func = lambda dummy_env: self._raw_actions
         cfg.low_level_observations.velocity_commands.params = dict()
 
-        # add the low level observations to the observation manager
-        self._low_level_obs_manager = ObservationManager({"ll_policy": cfg.low_level_observations}, env)
-
-        self._counter = 0
-
     """
     Properties.
     """
 
     @property
     def action_dim(self) -> int:
-        return 3
+        return self.cfg.action_dim
 
     @property
     def raw_actions(self) -> torch.Tensor:
@@ -85,6 +100,11 @@ class PreTrainedPolicyAction(ActionTerm):
     @property
     def processed_actions(self) -> torch.Tensor:
         return self.raw_actions
+
+    @property
+    def policy_state(self) -> torch.Tensor | None:
+        """Explicit recurrent policy state, or ``None`` for legacy policies."""
+        return self._policy_state
 
     """
     Operations.
@@ -96,11 +116,26 @@ class PreTrainedPolicyAction(ActionTerm):
     def apply_actions(self):
         if self._counter % self.cfg.low_level_decimation == 0:
             low_level_obs = self._low_level_obs_manager.compute_group("ll_policy")
-            self.low_level_actions[:] = self.policy(low_level_obs)
+            if self._policy_state is None:
+                self.low_level_actions[:] = self.policy(low_level_obs)
+            else:
+                low_level_actions, self._policy_state = self.policy(low_level_obs, self._policy_state)
+                self.low_level_actions[:] = low_level_actions
             self._low_level_action_term.process_actions(self.low_level_actions)
             self._counter = 0
         self._low_level_action_term.apply_actions()
         self._counter += 1
+
+    def reset(self, env_ids=None) -> None:
+        """Reset command, nested action, observation, and recurrent state buffers."""
+        if env_ids is None:
+            env_ids = slice(None)
+        self._raw_actions[env_ids] = 0.0
+        self.low_level_actions[env_ids] = 0.0
+        if self._policy_state is not None:
+            self._policy_state[:, env_ids, :] = 0.0
+        self._low_level_action_term.reset(env_ids=env_ids)
+        self._low_level_obs_manager.reset(env_ids=env_ids)
 
     """
     Debug visualization.

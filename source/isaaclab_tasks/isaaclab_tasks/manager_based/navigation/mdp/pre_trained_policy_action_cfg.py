@@ -23,7 +23,13 @@ class PreTrainedPolicyActionCfg(ActionTermCfg):
     """Name of the asset in the environment for which the commands are generated."""
 
     policy_path: str = MISSING
-    """Path to the low level policy (.pt files)."""
+    """Path to the low-level TorchScript policy."""
+
+    action_dim: int = 3
+    """Dimension of the commands consumed by the pre-trained policy."""
+
+    recurrent_state_shape: tuple[int, int] | None = None
+    """Optional ``(num_layers, hidden_size)`` shape for a policy with explicit recurrent state."""
 
     low_level_decimation: int = 4
     """Decimation factor for the low level action term."""
