@@ -313,9 +313,7 @@ class ContactSensor(BaseContactSensor):
         is_recursive_path = self.cfg.prim_path.endswith("/**")
         if is_recursive_path:
             recursive_root_expr = self.cfg.prim_path[: -len("/**")]
-            root_matches = resolve_matching_prims_from_source(
-                recursive_root_expr, predicate=None, raise_if_no_matches=False
-            )
+            root_matches = resolve_matching_prims_from_source(recursive_root_expr, predicate=None)
             prim_matches = []
             for root_prim, root_expr in root_matches:
                 root_path = root_prim.GetPath().pathString
@@ -329,9 +327,7 @@ class ContactSensor(BaseContactSensor):
                     rel_path = prim.GetPath().pathString[len(root_path) :].lstrip("/")
                     prim_matches.append((prim, f"{root_expr}/{rel_path}"))
         else:
-            prim_matches = resolve_matching_prims_from_source(
-                self.cfg.prim_path, predicate=has_contact_report, raise_if_no_matches=False
-            )
+            prim_matches = resolve_matching_prims_from_source(self.cfg.prim_path, predicate=has_contact_report)
         if not prim_matches and not is_recursive_path:
             parent_expr, leaf_pattern = self.cfg.prim_path.rsplit("/", 1)
             name_pattern = re.compile(leaf_pattern)
