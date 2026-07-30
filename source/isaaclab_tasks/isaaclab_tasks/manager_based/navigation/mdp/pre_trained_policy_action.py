@@ -46,6 +46,8 @@ class PreTrainedPolicyAction(ActionTerm):
             raise FileNotFoundError(f"Policy file '{cfg.policy_path}' does not exist.")
         file_bytes = read_file(cfg.policy_path)
         self.policy = torch.jit.load(file_bytes).to(env.device).eval()
+        for parameter in self.policy.parameters():
+            parameter.requires_grad_(False)
 
         self._raw_actions = torch.zeros(self.num_envs, self.action_dim, device=self.device)
 
@@ -116,11 +118,13 @@ class PreTrainedPolicyAction(ActionTerm):
     def apply_actions(self):
         if self._counter % self.cfg.low_level_decimation == 0:
             low_level_obs = self._low_level_obs_manager.compute_group("ll_policy")
-            if self._policy_state is None:
-                self.low_level_actions[:] = self.policy(low_level_obs)
-            else:
-                low_level_actions, self._policy_state = self.policy(low_level_obs, self._policy_state)
-                self.low_level_actions[:] = low_level_actions
+            with torch.inference_mode():
+                if self._policy_state is None:
+                    self.low_level_actions[:] = self.policy(low_level_obs)
+                else:
+                    low_level_actions, next_policy_state = self.policy(low_level_obs, self._policy_state)
+                    self.low_level_actions[:] = low_level_actions
+                    self._policy_state.copy_(next_policy_state)
             self._low_level_action_term.process_actions(self.low_level_actions)
             self._counter = 0
         self._low_level_action_term.apply_actions()

@@ -70,6 +70,9 @@ class _Policy:
     def eval(self):
         return self
 
+    def parameters(self):
+        return ()
+
     def __call__(self, observations: torch.Tensor, hidden_state: torch.Tensor | None = None):
         self.calls.append((observations.clone(), None if hidden_state is None else hidden_state.clone()))
         actions = observations[:, : self.action_dim]
@@ -209,3 +212,28 @@ def test_low_level_observation_binding_is_overridable(monkeypatch) -> None:
     action = SpecializedAction(_make_cfg(), _make_env())
 
     assert action.binding_was_overridden
+
+
+def test_policy_parameters_and_inference_are_frozen(monkeypatch) -> None:
+    """Low-level inference must not construct an autograd graph during environment stepping."""
+    module = _load_action_module(monkeypatch)
+
+    class GradientTrackingPolicy(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.linear = torch.nn.Linear(4, 2)
+            self.grad_enabled_during_forward = None
+
+        def forward(self, observations: torch.Tensor) -> torch.Tensor:
+            self.grad_enabled_during_forward = torch.is_grad_enabled()
+            return self.linear(observations)
+
+    policy = GradientTrackingPolicy()
+    monkeypatch.setattr(torch.jit, "load", lambda _file: policy)
+    action = module.PreTrainedPolicyAction(_make_cfg(), _make_env())
+
+    action.apply_actions()
+
+    assert all(not parameter.requires_grad for parameter in policy.parameters())
+    assert policy.grad_enabled_during_forward is False
+    assert action.low_level_actions.grad_fn is None
