@@ -119,8 +119,14 @@ class RslRlRNNModelCfg(RslRlMLPModelCfg):
     rnn_num_layers: int = MISSING
     """The number of RNN layers."""
 
-    structure: Literal["gru_mlp", "mlp_gru"] = "gru_mlp"
-    """The model ordering. ``gru_mlp`` is upstream RSL-RL default; ``mlp_gru`` applies an MLP encoder before the RNN."""
+    structure: Literal["gru_mlp", "mlp_gru", "split_gru_mlp"] = "gru_mlp"
+    """The model ordering, including an optional observation-split GRU followed by an MLP."""
+
+    recurrent_obs_range: tuple[int, int] | None = None
+    """The half-open observation range processed by ``split_gru_mlp``."""
+
+    bypass_obs_range: tuple[int, int] | None = None
+    """The half-open observation range concatenated after the GRU by ``split_gru_mlp``."""
 
 
 @configclass
