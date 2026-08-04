@@ -93,6 +93,29 @@ class RslRlRNNModelCfg(RslRlMLPModelCfg):
     rnn_num_layers: int = MISSING
     """The number of RNN layers."""
 
+    structure: Literal["gru_mlp", "mlp_gru", "split_cnn_gru_mlp"] = "gru_mlp"
+    """The supported recurrent model ordering."""
+
+    recurrent_obs_range: tuple[int, int] | None = None
+    """The half-open observation range processed by ``split_cnn_gru_mlp``."""
+
+    cnn_obs_range: tuple[int, int] | None = None
+    """The half-open trajectory range processed by ``split_cnn_gru_mlp``."""
+
+    cnn_obs_shape: tuple[int, int] | None = None
+    """The ``(time, channels)`` shape of the flattened CNN observation range."""
+
+    cnn_channels: tuple[int, ...] | None = None
+    """The output channels of each temporal convolution."""
+
+    cnn_kernel_size: int | None = None
+    """The shared valid-convolution kernel size."""
+
+    cnn_output_dim: int | None = None
+    """The output dimension of the post-convolution linear projection."""
+
+    shortcut_obs_range: tuple[int, int] | None = None
+    """The direct-feedback range concatenated after the GRU and CNN branches."""
 
 @configclass
 class RslRlCNNModelCfg(RslRlMLPModelCfg):
