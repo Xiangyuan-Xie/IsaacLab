@@ -119,14 +119,11 @@ class RslRlRNNModelCfg(RslRlMLPModelCfg):
     rnn_num_layers: int = MISSING
     """The number of RNN layers."""
 
-    structure: Literal["gru_mlp", "mlp_gru", "split_gru_mlp", "split_cnn_gru_mlp"] = "gru_mlp"
-    """The model ordering, including an optional observation-split GRU followed by an MLP."""
+    structure: Literal["gru_mlp", "mlp_gru", "split_cnn_gru_mlp"] = "gru_mlp"
+    """The supported recurrent model ordering."""
 
     recurrent_obs_range: tuple[int, int] | None = None
-    """The half-open observation range processed by ``split_gru_mlp``."""
-
-    bypass_obs_range: tuple[int, int] | None = None
-    """The half-open observation range concatenated after the GRU by ``split_gru_mlp``."""
+    """The half-open observation range processed by ``split_cnn_gru_mlp``."""
 
     cnn_obs_range: tuple[int, int] | None = None
     """The half-open trajectory range processed by ``split_cnn_gru_mlp``."""
