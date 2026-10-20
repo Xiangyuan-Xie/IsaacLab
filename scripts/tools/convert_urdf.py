@@ -82,6 +82,33 @@ parser.add_argument(
     choices=["position", "velocity", "none"],
     help="The type of control to use for the joint drive.",
 )
+parser.add_argument(
+    "--collision-from-visuals",
+    action="store_true",
+    default=False,
+    help="Generate collision geometry from visual geometries.",
+)
+parser.add_argument(
+    "--collision-type",
+    type=str,
+    default="Convex Decomposition",
+    choices=["Convex Hull", "Convex Decomposition", "Bounding Sphere", "Bounding Cube"],
+    help="The collision geometry type to use when generating collisions from visual geometries.",
+)
+instanceable_group = parser.add_mutually_exclusive_group()
+instanceable_group.add_argument(
+    "--make-instanceable",
+    dest="make_instanceable",
+    action="store_true",
+    default=True,
+    help="Make the generated USD instanceable.",
+)
+instanceable_group.add_argument(
+    "--no-make-instanceable",
+    dest="make_instanceable",
+    action="store_false",
+    help="Generate a flat USD without instanceable mesh references.",
+)
 add_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -151,6 +178,9 @@ def main():
         fix_base=args_cli.fix_base,
         merge_fixed_joints=args_cli.merge_joints,
         force_usd_conversion=True,
+        make_instanceable=args_cli.make_instanceable,
+        collision_from_visuals=args_cli.collision_from_visuals,
+        collision_type=args_cli.collision_type,
         ros_package_paths=[{"name": name, "path": os.path.abspath(path)} for name, path in args_cli.ros_package_path],
         joint_drive=UrdfConverterCfg.JointDriveCfg(
             gains=UrdfConverterCfg.JointDriveCfg.PDGainsCfg(
@@ -159,6 +189,7 @@ def main():
             ),
             target_type=args_cli.joint_target_type,
         ),
+        self_collision=True,
     )
 
     # Print info
